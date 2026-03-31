@@ -1,0 +1,10 @@
+# ─── Core Computer Vision ────────────────────────────────────────────────────
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+
+# ─── Numerical / Scientific ───────────────────────────────────────────────────
+numpy>=1.24.0
+scipy>=1.11.0
+
+# ─── Audio (optional — falls back to winsound on Windows if missing) ─────────
+pygame>=2.5.0
