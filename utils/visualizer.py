@@ -1,90 +1,116 @@
 """
 visualizer.py — OpenCV Drawing Utilities
 =========================================
-All HUD overlays, landmark renderings, and alert banners for
-the drowsiness detector live here.
+Clean, minimal overlays for the drowsiness detector.
+  - Face oval tracking outline (replaces eye dots)
+  - Minimal status bar at the bottom of the frame
+  - Flashing alert banner when drowsy
 """
 
 import cv2
 import numpy as np
 
 # ─── Color Palette (BGR) ────────────────────────────────────────────────────
-GREEN      = (80, 220, 100)
-RED        = (50,  50, 230)
-YELLOW     = (0,  210, 255)
-CYAN       = (220, 200,  0)
-WHITE      = (255, 255, 255)
-BLACK      = (  0,   0,   0)
-DARK_PANEL = ( 15,  15,  25)
-ORANGE     = ( 0,  140, 255)
+GREEN  = ( 60, 210,  80)
+RED    = ( 45,  55, 220)
+YELLOW = (  0, 200, 240)
+WHITE  = (255, 255, 255)
+GRAY   = (160, 160, 160)
+
+# MediaPipe face oval landmark indices (subset of the 468-point mesh)
+# These trace the outer boundary of the face.
+FACE_OVAL_IDX = [
+    10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+    397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
+    172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109, 10
+]
+
+# A few key points to show as subtle tracking dots (nose, chin, cheeks)
+KEY_POINTS_IDX = [1, 4, 152, 234, 454]
 
 
-# ─── HUD Panel ──────────────────────────────────────────────────────────────
-def draw_overlay_panel(frame: np.ndarray, ear: float, blink_count: int,
-                       alert_active: bool, fps: float,
-                       alert_frame_count: int, alert_threshold: int) -> np.ndarray:
+# ─── Face Tracking Overlay ──────────────────────────────────────────────────
+def draw_face_tracking(frame: np.ndarray, landmarks, w: int, h: int,
+                       alert_active: bool, warning_active: bool = False) -> np.ndarray:
     """
-    Draw a semi-transparent HUD panel in the top-left corner.
+    Draw a clean face oval + key point dots.
+    Colour: green (awake) → yellow (warning) → red (drowsy).
+    """
+    color = RED if alert_active else YELLOW if warning_active else GREEN
 
-    Shows:  EAR value + bar, blink counter, FPS, status text,
-            and a countdown bar to alert trigger.
+    # Convert face oval indices to pixel coords
+    oval_pts = []
+    for idx in FACE_OVAL_IDX:
+        lm = landmarks[idx]
+        oval_pts.append((int(lm.x * w), int(lm.y * h)))
+
+    # Draw the oval outline
+    for i in range(len(oval_pts) - 1):
+        cv2.line(frame, oval_pts[i], oval_pts[i + 1], color, 1, cv2.LINE_AA)
+
+    # Corner accent marks at top and chin for a "tracking target" feel
+    top   = oval_pts[0]
+    chin  = oval_pts[17] if len(oval_pts) > 17 else oval_pts[-1]
+    left  = oval_pts[9]  if len(oval_pts) > 9  else oval_pts[0]
+    right = oval_pts[27] if len(oval_pts) > 27 else oval_pts[-1]
+
+    tick_len = 10
+    tick_w   = 2
+    for anchor, direction in [
+        (top,   [(0, -tick_len), (-tick_len, 0), (tick_len, 0)]),
+        (chin,  [(0,  tick_len), (-tick_len, 0), (tick_len, 0)]),
+        (left,  [(-tick_len, 0), (0, -tick_len), (0, tick_len)]),
+        (right, [( tick_len, 0), (0, -tick_len), (0, tick_len)]),
+    ]:
+        ax, ay = anchor
+        for dx, dy in direction:
+            cv2.line(frame, (ax, ay), (ax + dx, ay + dy), color, tick_w, cv2.LINE_AA)
+
+    # Key point dots (nose tip, chin, cheeks)
+    for idx in KEY_POINTS_IDX:
+        lm = landmarks[idx]
+        cx, cy = int(lm.x * w), int(lm.y * h)
+        cv2.circle(frame, (cx, cy), 3, color, -1, cv2.LINE_AA)
+
+    return frame
+
+
+# ─── Minimal Status Bar ─────────────────────────────────────────────────────
+def draw_status_bar(frame: np.ndarray, ear: float, alert_active: bool,
+                    warning_active: bool, face_found: bool) -> np.ndarray:
+    """
+    Thin status bar at the very bottom of the frame.
+    Shows EAR value and 3-stage status.
     """
     h, w = frame.shape[:2]
-    panel_w, panel_h = 290, 210
+    bar_h = 28
 
-    # Semi-transparent dark background
     overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (panel_w, panel_h), DARK_PANEL, -1)
-    cv2.addWeighted(overlay, 0.72, frame, 0.28, 0, frame)
+    cv2.rectangle(overlay, (0, h - bar_h), (w, h), (12, 14, 20), -1)
+    cv2.addWeighted(overlay, 0.80, frame, 0.20, 0, frame)
 
-    # Border line
-    cv2.rectangle(frame, (0, 0), (panel_w, panel_h), GREEN, 1)
+    if not face_found:
+        cv2.putText(frame, "No face detected", (10, h - 9),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.50, GRAY, 1, cv2.LINE_AA)
+        return frame
 
-    # ── Title ────────────────────────────────────────────────────────────────
-    cv2.putText(frame, "DROWSINESS MONITOR", (10, 24),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, GREEN, 2, cv2.LINE_AA)
-    cv2.line(frame, (10, 32), (280, 32), GREEN, 1)
+    if alert_active:
+        ear_color  = RED
+        status_str = "DROWSY"
+        status_col = RED
+    elif warning_active:
+        ear_color  = YELLOW
+        status_str = "CAUTION"
+        status_col = YELLOW
+    else:
+        ear_color  = GREEN if ear >= 0.28 else YELLOW
+        status_str = "AWAKE"
+        status_col = GREEN
 
-    # ── EAR Value ────────────────────────────────────────────────────────────
-    ear_color = RED if ear < 0.25 else YELLOW if ear < 0.30 else GREEN
-    cv2.putText(frame, f"EAR    :  {ear:.3f}", (10, 58),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.58, ear_color, 2, cv2.LINE_AA)
-
-    # EAR progress bar
-    bar_bg   = (50, 50, 65)
-    bar_full = 220
-    bar_val  = max(0, min(int(ear / 0.42 * bar_full), bar_full))
-    cv2.rectangle(frame, (10, 66),  (10 + bar_full, 80), bar_bg, -1)
-    cv2.rectangle(frame, (10, 66),  (10 + bar_val,  80), ear_color, -1)
-    # Threshold marker
-    thresh_x = int(0.25 / 0.42 * bar_full) + 10
-    cv2.line(frame, (thresh_x, 62), (thresh_x, 84), RED, 2)
-
-    # ── Blink Count ──────────────────────────────────────────────────────────
-    cv2.putText(frame, f"Blinks :  {blink_count}", (10, 108),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.58, WHITE, 1, cv2.LINE_AA)
-
-    # ── FPS ──────────────────────────────────────────────────────────────────
-    fps_color = GREEN if fps > 20 else YELLOW if fps > 12 else RED
-    cv2.putText(frame, f"FPS    :  {fps:.1f}", (10, 135),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.58, fps_color, 1, cv2.LINE_AA)
-
-    # ── Alert Charge Bar ─────────────────────────────────────────────────────
-    charge_label = "CHARGE :"
-    charge_full  = 220
-    charge_val   = max(0, min(int(alert_frame_count / alert_threshold * charge_full),
-                              charge_full))
-    charge_color = RED if alert_active else ORANGE if charge_val > charge_full // 2 else YELLOW
-    cv2.putText(frame, charge_label, (10, 162),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.50, WHITE, 1, cv2.LINE_AA)
-    cv2.rectangle(frame, (10, 168), (10 + charge_full, 180), (50, 50, 65), -1)
-    cv2.rectangle(frame, (10, 168), (10 + charge_val,  180), charge_color, -1)
-
-    # ── Status ───────────────────────────────────────────────────────────────
-    status_text  = "!!! DROWSY !!!" if alert_active else "ALERT"
-    status_color = RED if alert_active else GREEN
-    cv2.putText(frame, f"Status :  {status_text}", (10, 202),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.58, status_color, 2, cv2.LINE_AA)
+    cv2.putText(frame, f"EAR {ear:.3f}", (10, h - 9),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.50, ear_color, 1, cv2.LINE_AA)
+    cv2.putText(frame, status_str, (w - 90, h - 9),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.50, status_col, 2, cv2.LINE_AA)
 
     return frame
 
@@ -92,51 +118,26 @@ def draw_overlay_panel(frame: np.ndarray, ear: float, blink_count: int,
 # ─── Alert Banner ───────────────────────────────────────────────────────────
 def draw_alert_banner(frame: np.ndarray, alert_active: bool,
                       tick: int) -> np.ndarray:
-    """
-    Draws a flashing red banner at the bottom of the frame when drowsy.
-    The banner flashes at ~2 Hz using the tick counter.
-    """
+    """Flashing red banner at the top of the frame when drowsy."""
     if not alert_active:
         return frame
 
     h, w = frame.shape[:2]
-    # Flash every 15 ticks
-    if (tick // 15) % 2 == 0:
+    if (tick // 12) % 2 == 0:
         overlay = frame.copy()
-        cv2.rectangle(overlay, (0, h - 75), (w, h), (0, 0, 180), -1)
-        cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
-        text = "  !!  DROWSINESS DETECTED  —  PLEASE TAKE A BREAK  !!  "
-        text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_DUPLEX, 0.68, 2)[0]
-        text_x = max((w - text_size[0]) // 2, 5)
-        cv2.putText(frame, text, (text_x, h - 28),
-                    cv2.FONT_HERSHEY_DUPLEX, 0.68, WHITE, 2, cv2.LINE_AA)
+        cv2.rectangle(overlay, (0, 0), (w, 38), (20, 20, 180), -1)
+        cv2.addWeighted(overlay, 0.72, frame, 0.28, 0, frame)
+        text = "DROWSINESS DETECTED — PLEASE TAKE A BREAK"
+        sz   = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)[0]
+        cv2.putText(frame, text, ((w - sz[0]) // 2, 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, WHITE, 2, cv2.LINE_AA)
     return frame
 
 
-# ─── Eye Landmarks ──────────────────────────────────────────────────────────
-def draw_eye_landmarks(frame: np.ndarray, eye_points: list,
-                       color: tuple) -> np.ndarray:
-    """
-    Draw the convex hull of eye landmark points.
-    Also draws a small dot at each landmark.
-
-    Args:
-        frame:      BGR image array
-        eye_points: list of (x, y) tuples
-        color:      BGR color tuple
-    """
-    pts = np.array([(int(p[0]), int(p[1])) for p in eye_points])
-    hull = cv2.convexHull(pts)
-    cv2.drawContours(frame, [hull], -1, color, 1, cv2.LINE_AA)
-    for pt in pts:
-        cv2.circle(frame, tuple(pt), 2, color, -1, cv2.LINE_AA)
-    return frame
-
-
-# ─── Timestamp & Watermark ──────────────────────────────────────────────────
+# ─── Timestamp ──────────────────────────────────────────────────────────────
 def draw_timestamp(frame: np.ndarray, timestamp: str) -> np.ndarray:
-    """Draws a timestamp in the bottom-right corner."""
+    """Subtle timestamp in the top-right corner."""
     h, w = frame.shape[:2]
-    cv2.putText(frame, timestamp, (w - 230, h - 12),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1, cv2.LINE_AA)
+    cv2.putText(frame, timestamp, (w - 228, 18),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (100, 100, 100), 1, cv2.LINE_AA)
     return frame

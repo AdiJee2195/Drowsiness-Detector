@@ -1,10 +1,11 @@
 # 🚗 Real-Time Driver Drowsiness Detection System
 
-> A Computer Vision project that monitors a driver's eyes in real-time using a webcam and triggers an audio + visual alert when prolonged eye closure (drowsiness) is detected.
+> A Computer Vision system that monitors a driver's eyes through a webcam, detects drowsiness in real-time using facial landmark geometry, and delivers progressive visual and audio alerts — all through a live web dashboard accessible from any browser on the local network.
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)](https://python.org)
 [![OpenCV](https://img.shields.io/badge/OpenCV-4.8%2B-green?logo=opencv)](https://opencv.org)
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-0.10%2B-orange)](https://mediapipe.dev)
+[![Flask](https://img.shields.io/badge/Flask-3.0%2B-lightgrey?logo=flask)](https://flask.palletsprojects.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 ---
@@ -14,12 +15,12 @@
 - [Problem Statement](#-problem-statement)
 - [How It Works](#-how-it-works)
 - [Features](#-features)
+- [Alert Stages](#-alert-stages)
 - [Project Structure](#-project-structure)
 - [Setup & Installation](#-setup--installation)
 - [Usage](#-usage)
+- [Dashboard](#-dashboard)
 - [Configuration](#-configuration)
-- [Controls](#-controls)
-- [Output & Logs](#-output--logs)
 - [Technical Details](#-technical-details)
 - [Dependencies](#-dependencies)
 
@@ -29,23 +30,23 @@
 
 Drowsy driving is a leading cause of road accidents worldwide. According to NHAI data, fatigue-related crashes account for a significant proportion of highway fatalities in India. Drivers often fall asleep without realizing it — making **early detection critical**.
 
-This system provides a real-time, non-intrusive computer vision solution: it watches the driver's eyes through a webcam and fires an alert the moment sustained eye closure is detected, giving the driver time to pull over safely.
+This system provides a real-time, non-intrusive computer vision solution: it watches the driver's eyes through a webcam, progressively warns them as eyes begin to close, and fires a full alert if sustained eye closure is detected — giving the driver time to pull over safely.
 
 ---
 
 ## 🧠 How It Works
 
-The system uses a three-stage pipeline:
+The system uses a four-stage pipeline:
 
 ```
-Webcam Frame → Face Landmark Detection → EAR Calculation → Alert Logic
+Webcam Frame → Face Landmark Detection → EAR Calculation → 3-Stage Alert Logic → Web Dashboard
 ```
 
 ### 1. Face Landmark Detection
-**MediaPipe FaceMesh** detects 468 facial landmarks in each frame. Six specific landmarks per eye are extracted — chosen to match the EAR formula.
+**MediaPipe FaceMesh** detects 468 facial landmarks per frame. Six specific landmarks per eye are extracted to calculate the EAR. The full face oval outline (36 landmarks) is drawn as a tracking indicator.
 
 ### 2. Eye Aspect Ratio (EAR)
-The EAR is a ratio that quantifies how open the eye is:
+The EAR quantifies how open an eye is using a geometric ratio:
 
 ```
         ||p2 - p6|| + ||p3 - p5||
@@ -53,20 +54,33 @@ EAR =  ────────────────────────�
               2 × ||p1 - p4||
 ```
 
-Where `p1–p6` are the six eye landmark coordinates.
+Where `p1–p6` are the six eye landmark coordinates (horizontal and vertical extents).
 
-| State        | EAR Value  |
-|--------------|------------|
-| Eyes open    | ~0.30      |
-| Eyes blinking| ~0.15      |
-| Eyes closed  | ~0.0       |
+| State         | EAR Value |
+|---------------|-----------|
+| Eyes open     | ~0.30     |
+| Eyes blinking | ~0.15     |
+| Eyes closed   | ~0.00     |
 
 📌 Reference: *Soukupová & Čech, "Real-Time Eye Blink Detection using Facial Landmarks", CVWW 2016*
 
-### 3. Alert Logic
-- If EAR stays **below 0.25** for **20+ consecutive frames** → **DROWSY**
-- A flashing banner appears on screen and an audio alarm sounds
-- Events are logged to `logs/drowsiness_log.csv`
+### 3. Three-Stage Alert Logic
+
+Rather than a binary awake/drowsy switch, the system escalates through three stages as eye-closed frames accumulate:
+
+| Frames below threshold | Stage | Colour |
+|---|---|---|
+| 0 – 74% of threshold | **NORMAL — AWAKE** | 🟢 Green |
+| 75 – 99% of threshold | **CAUTION — WARNING** | 🟡 Yellow |
+| ≥ 100% of threshold | **ALERT — DROWSY** | 🔴 Red |
+
+With the default threshold of 20 frames at ~30 FPS:
+- **Green** → frames 0–14 (~normal blinking range)
+- **Yellow** → frames 15–19 (~500 ms, eyes are clearly closing)
+- **Red** → frame 20+ (~667 ms of sustained closure → alarm fires)
+
+### 4. Web Dashboard
+A Flask server streams the processed video and stats to a real-time browser dashboard via MJPEG and Server-Sent Events (SSE), accessible at `http://localhost:5050`.
 
 ---
 
@@ -74,15 +88,51 @@ Where `p1–p6` are the six eye landmark coordinates.
 
 | Feature | Description |
 |---|---|
-| 🎯 Real-time EAR | Computed every frame at full webcam speed |
-| 👁️ Eye Landmark Overlay | Draws convex hulls around both eyes with color-coded status |
-| 📊 HUD Panel | Shows EAR value, EAR bar, blink count, FPS, charge bar, and status |
-| 🔊 Audio Alarm | Two-tone alarm (either via pygame or Windows winsound) |
-| ⚡ Flashing Banner | Red warning banner when drowsiness is sustained |
-| 📝 CSV Logging | Every alert start/end is timestamped and saved |
-| 🔢 Blink Counter | Tracks total blinks in the session |
-| ⌨️ Keyboard Controls | Quit, reset counter, toggle sound — all live |
-| 🎛️ CLI Arguments | Customize threshold, frame count, camera, and alarm |
+| 🎯 Real-time EAR | Computed every frame at full webcam speed (~30 FPS) |
+| 🔵 Face Oval Tracking | Draws the full face outline — green/yellow/red reflects current alert state |
+| 🚦 3-Stage Alerting | Progressive warning before full alarm — reduces false-positive disruptions |
+| 🌐 Web Dashboard | Live browser interface: EAR chart, status ring, event log, telemetry |
+| 📊 EAR History Chart | Rolling 80-frame line chart showing EAR over time with threshold line |
+| 🔊 Audio Alarm | Two-tone alarm fires only on full DROWSY state (not on caution) |
+| ⚡ Flashing Banner | Red overlay banner when drowsiness is sustained |
+| 📝 Driver Event Log | Timestamped log of CAUTION, DROWSINESS, and RECOVERED events |
+| 🔢 Blink Counter | Counts total blinks across the session |
+| 🎚️ Adaptive Threshold | EAR threshold adjustable live via dashboard slider |
+| 👁️ Personal Calibration | One-click calibration to set threshold for individual eye geometry |
+| 📡 Local Network Access | Dashboard reachable from other devices on the same network |
+
+---
+
+## 🚦 Alert Stages
+
+The system transitions smoothly between three stages with no abrupt jumps:
+
+### 🟢 Normal — Awake
+- Face oval: **green**
+- Status ring: green glow
+- Header pill: **DRIVER ALERT**
+- No audio
+
+### 🟡 Caution — Warning
+- Face oval: **yellow** (pulsing glow)
+- Status ring: yellow glow with animation
+- Header pill: **CAUTION**
+- Video footer: *"Caution: Eyes Closing"*
+- Log entry: `CAUTION` (yellow dot)
+- No audio — this is a visual nudge only
+
+### 🔴 Alert — Drowsy
+- Face oval: **red**
+- Status ring: red pulsing glow
+- Header pill: **DROWSINESS DETECTED**
+- Flashing red banner: *"DROWSINESS DETECTED — PLEASE TAKE A BREAK"*
+- Audio alarm fires
+- Log entry: `DROWSINESS` (red dot)
+
+### 🟢 Recovered
+After drowsy or caution states, once eyes reopen:
+- All indicators return to green
+- Log entry: `RECOVERED` (green dot) — recorded after both caution and full alert
 
 ---
 
@@ -91,14 +141,21 @@ Where `p1–p6` are the six eye landmark coordinates.
 ```
 drowsiness-detector/
 │
-├── detector.py           ← Main script — run this
+├── web_app.py            ← Flask server — main entry point
 ├── generate_alarm.py     ← Generates alarm.wav (run once)
 ├── alarm.wav             ← Alert sound (auto-generated)
 │
 ├── utils/
 │   ├── __init__.py
 │   ├── ear.py            ← Eye Aspect Ratio formula
-│   └── visualizer.py     ← All OpenCV drawing functions
+│   └── visualizer.py     ← OpenCV drawing: face oval, status bar, alert banner
+│
+├── templates/
+│   └── index.html        ← Dashboard HTML
+│
+├── static/
+│   ├── dashboard.css     ← Dark glassmorphism UI styles
+│   └── dashboard.js      ← SSE client, chart rendering, status logic
 │
 ├── logs/
 │   └── drowsiness_log.csv  ← Session event log (auto-created)
@@ -148,22 +205,41 @@ This creates `alarm.wav` using only Python built-ins — no external tools neede
 
 ## 🚀 Usage
 
-### Basic Run (default settings)
+### Start the Dashboard Server
 ```bash
-python detector.py
+python web_app.py
 ```
+
+Then open your browser at **http://localhost:5050**
+
+The dashboard is also accessible from other devices on the same local network at the IP address printed in the terminal (e.g. `http://192.168.x.x:5050`).
 
 ### With Custom Options
 ```bash
 # Use camera index 1, stricter threshold, longer delay before alert
-python detector.py --cam 1 --ear 0.22 --frames 25
+python web_app.py --cam 1 --ear 0.22 --frames 25
 
 # Disable audio (visual alert only)
-python detector.py --no-sound
-
-# Use a custom alarm file
-python detector.py --alarm my_alarm.wav
+python web_app.py --no-sound
 ```
+
+---
+
+## 🖥️ Dashboard
+
+The web dashboard provides a complete real-time monitoring interface:
+
+| Panel | Contents |
+|---|---|
+| **Live Camera Feed** | MJPEG stream with face oval overlay and thin status bar |
+| **EAR History Chart** | Rolling 80-frame line chart with threshold marker |
+| **Status Ring** | Large circular indicator — green / yellow / red with glow animation |
+| **Telemetry** | EAR value, threshold, blink count, FPS, session duration |
+| **Calibrate Button** | 10-second calibration to set your personal EAR threshold |
+| **Driver Log** | Timestamped list of CAUTION, DROWSINESS, and RECOVERED events |
+
+### Personal Calibration
+Click **"Calibrate for My Eyes"** and keep your eyes open naturally for 10 seconds. The system averages your open-eye EAR samples and sets the threshold to `mean × 0.75`, accounting for personal eye geometry (especially useful for people with naturally smaller or narrower eyes).
 
 ---
 
@@ -172,62 +248,45 @@ python detector.py --alarm my_alarm.wav
 | Argument | Default | Description |
 |---|---|---|
 | `--cam` | `0` | Webcam index (0 = default camera) |
-| `--ear` | `0.25` | EAR threshold (lower = stricter) |
-| `--frames` | `20` | Frames below threshold before alert fires |
+| `--ear` | `0.20` | Starting EAR threshold (overridden by calibration) |
+| `--frames` | `20` | Consecutive frames below threshold before DROWSY fires |
 | `--no-sound` | `False` | Disable audio alarm |
-| `--alarm` | `alarm.wav` | Path to custom alarm WAV file |
 
 **Tuning tips:**
 - If alerts trigger during normal blinks → increase `--frames` to `25–30`
 - If detection is too slow → decrease `--frames` to `15`
-- If wearing glasses causes misdetection → decrease `--ear` to `0.22`
-
----
-
-## ⌨️ Controls
-
-| Key | Action |
-|---|---|
-| `Q` or `ESC` | Quit the program |
-| `R` | Reset the blink counter |
-| `S` | Toggle sound on/off |
-
----
-
-## 📊 Output & Logs
-
-Every drowsiness event is automatically logged to `logs/drowsiness_log.csv`:
-
-```csv
-timestamp,event,ear_value
-2025-04-01 10:14:32,DROWSY_START,0.1823
-2025-04-01 10:14:38,DROWSY_END,0.2904
-2025-04-01 10:22:07,DROWSY_START,0.1511
-```
-
-The terminal also prints real-time status messages:
-```
-⚠  ALERT  Drowsiness detected at 10:14:32  EAR=0.182
-✓  OK     Driver alert again at 10:14:38
-```
+- For small/narrow eyes → use the Calibrate button rather than manually lowering `--ear`
+- The warning stage always fires at 75% of `--frames` (e.g. frame 15 of 20)
 
 ---
 
 ## 🔬 Technical Details
 
 ### Landmark Selection (MediaPipe FaceMesh)
-MediaPipe provides 468 landmarks. We use 6 per eye specifically chosen to align with the EAR formula:
+MediaPipe provides 468 landmarks per frame. Six per eye are used for EAR:
 
 | Eye   | Landmark Indices |
 |-------|-----------------|
 | Left  | `362, 385, 387, 263, 373, 380` |
 | Right | `33, 160, 158, 133, 153, 144`  |
 
+The face oval (36 boundary landmarks) is additionally rendered as a tracking outline.
+
+### Architecture
+The system runs two concurrent threads:
+
+| Thread | Role |
+|---|---|
+| **Detection thread** (daemon) | Captures frames, runs MediaPipe, computes EAR, manages alert state, encodes JPEG |
+| **Flask thread** (main) | Serves the dashboard, streams MJPEG via `/video_feed`, pushes SSE stats via `/stats_stream` |
+
+Thread safety is managed by a single `threading.RLock` wrapping `DetectorState` — used as a context manager on every read/write.
+
 ### Why EAR Over Deep Learning?
 - **Interpretable**: The formula has clear geometric meaning
 - **Fast**: Runs in real-time on CPU — no GPU needed
 - **Lightweight**: No model training required
-- **Proven**: Published peer-reviewed research
+- **Proven**: Published peer-reviewed research (Soukupová & Čech, 2016)
 
 ### Performance
 - Runs at **25–30 FPS** on a mid-range CPU (Intel i5 / Ryzen 5)
@@ -239,9 +298,10 @@ MediaPipe provides 468 landmarks. We use 6 per eye specifically chosen to align 
 
 | Package | Purpose |
 |---|---|
-| `opencv-python` | Webcam capture, image processing, rendering |
+| `opencv-python` | Webcam capture, image processing, frame encoding |
 | `mediapipe` | 468-point FaceMesh landmark detection |
 | `numpy` | Numerical array operations |
+| `flask` | Web server, MJPEG streaming, SSE endpoint |
 | `scipy` | Euclidean distance for EAR calculation |
 | `pygame` | Cross-platform audio alarm playback |
 

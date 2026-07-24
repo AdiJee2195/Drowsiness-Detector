@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Real-time driver drowsiness detection powered by MediaPipe FaceMesh.">
+  <title>DD-Net: Drowsiness Detection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+
+  <!-- ── Header ────────────────────────────────────────────────── -->
+  <header id="app-header">
+    <div class="header-left">
+      <div class="logo-pip" id="logo-pip"></div>
+      <h1>DD-Net &nbsp;<span>Real-Time Drowsiness Detection</span></h1>
+    </div>
+    <div class="header-right">
+      <div id="global-status" class="gs-normal">
+        <span class="gs-dot" id="status-icon"></span>
+        <span id="status-text">CONNECTING</span>
+      </div>
+      <div class="session-chip">
+        SESSION&nbsp;&nbsp;<span id="session-timer" class="mono">00:00:00</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Main Grid ──────────────────────────────────────────────── -->
+  <main id="app-main">
+
+    <!-- ── LEFT: Camera ──────────────────────────────────────────── -->
+    <section class="panel-left" id="video-panel">
+      <div class="card-hdr">
+        <span class="card-ttl">Live Camera Feed</span>
+        <div class="hdr-badges">
+          <span class="badge badge-mono" id="badge-ear">EAR &mdash;</span>
+          <span class="badge" id="badge-fps">&mdash; FPS</span>
+        </div>
+      </div>
+      <div class="video-wrapper">
+        <div class="video-loading" id="video-loading">
+          <div class="spinner"></div>
+          <span>Connecting to camera&hellip;</span>
+        </div>
+        <img id="video-stream" src="/video_feed" alt="Live drowsiness detection webcam feed">
+        <div class="video-alert-overlay" id="video-alert-overlay"></div>
+      </div>
+      <div class="video-footer">
+        Status:&nbsp;<span id="video-status-text" class="vf-normal">Normal: Awake</span>
+      </div>
+    </section>
+
+    <!-- ── RIGHT: Stats ───────────────────────────────────────────── -->
+    <div class="panel-right">
+
+      <!-- Row 1: EAR Chart -->
+      <div class="card chart-card">
+        <div class="card-hdr">
+          <span class="card-ttl">Eye Aspect Ratio — History</span>
+          <span class="badge thresh-badge">Threshold&nbsp;<span id="threshold-display">0.200</span></span>
+        </div>
+        <div class="chart-body">
+          <canvas id="ear-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Row 2: Status + Metrics side-by-side -->
+      <div class="row-two">
+
+        <!-- Status Circle -->
+        <div class="card status-card">
+          <div class="card-hdr"><span class="card-ttl">Status</span></div>
+          <div class="status-center-body">
+            <div class="status-ring" id="status-ring">
+              <div class="status-ring-inner">
+                <div class="sr-label" id="status-main">NORMAL:</div>
+                <div class="sr-state" id="status-sub">AWAKE</div>
+                <div class="sr-note"  id="status-note">No drowsiness detected</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Metrics + Calibrate -->
+        <div class="card metrics-card">
+          <div class="card-hdr"><span class="card-ttl">Telemetry</span></div>
+          <div class="telem-grid">
+            <div class="telem-row">
+              <span class="telem-key">EAR</span>
+              <span class="telem-val mono" id="ear-value">0.300</span>
+            </div>
+            <div class="telem-row">
+              <span class="telem-key">Threshold</span>
+              <span class="telem-val mono" id="telem-threshold">0.200</span>
+            </div>
+            <div class="telem-row">
+              <span class="telem-key">Blinks</span>
+              <span class="telem-val mono" id="metric-blinks">0</span>
+            </div>
+            <div class="telem-row">
+              <span class="telem-key">FPS</span>
+              <span class="telem-val mono" id="metric-fps">0.0</span>
+            </div>
+            <div class="telem-row">
+              <span class="telem-key">Session</span>
+              <span class="telem-val mono" id="metric-session">00:00:00</span>
+            </div>
+          </div>
+          <button class="calib-btn" id="calib-btn" onclick="startCalibration()">
+            <span id="calib-icon">&#9678;</span>
+            <span id="calib-text">Calibrate for My Eyes</span>
+          </button>
+          <div id="calib-hint"      class="calib-hint hidden">Keep eyes <strong>open</strong> &amp; look at camera</div>
+          <div id="calib-countdown" class="calib-countdown hidden">3</div>
+        </div>
+      </div>
+
+      <!-- Row 3: Event Log (full width) -->
+      <div class="card log-card">
+        <div class="card-hdr"><span class="card-ttl">Driver Log</span></div>
+        <div class="log-list" id="log-list" role="log" aria-live="polite">
+          <div class="log-empty">No events recorded yet.</div>
+        </div>
+      </div>
+
+    </div><!-- /panel-right -->
+  </main>
+
+  <!-- ── Alert Banner ───────────────────────────────────────────── -->
+  <div id="alert-banner" role="alert" aria-live="assertive">
+    <span class="alert-warn-icon">&#9888;</span>
+    <div>
+      <div class="alert-title">DROWSINESS DETECTED</div>
+      <div class="alert-sub">Please pull over and take a break immediately.</div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>
